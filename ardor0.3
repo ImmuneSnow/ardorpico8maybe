@@ -1,0 +1,106 @@
+-- 1. define global variables
+local box_x = 64  -- start at the center x
+local box_y = 64  -- start at the center y
+local speed = 1 -- how fast you go 
+local trail = {}
+local trail_length = 4
+
+local mx = 0
+local my = 0
+
+-- to control size of the ray
+local stab_length = 9
+local stab_active = false
+local stab_timer = 0
+local stab_cooldown = 8
+local ray_x = 0
+local ray_y = 0
+
+
+-- 1.5, initial functions (obviously before logic stuff)
+function _init()
+    poke(0x5f2d, 1)
+end
+
+-- 2. the update function runs 30 times a second to check input
+function _update()
+
+    mx = stat(32) -- x, side to side
+    my = stat(33) -- y, up and down
+
+    -- check for left input (w or left arrow)
+    if (btn(0)) then
+        box_x = box_x - speed
+    end
+
+    -- check for right input (d or right arrow)
+    if (btn(1)) then
+        box_x = box_x + speed
+    end
+
+    -- check for up input (s or up arrow)
+    if (btn(2)) then
+        box_y = box_y - speed
+    end
+
+    -- check for down input (a or down arrow)
+    if (btn(3)) then
+        box_y = box_y + speed
+    end
+
+        -- store current position in the trail
+    add(trail, {x = box_x, y = box_y})
+
+    -- if trail is too long, remove the oldest entry (manual shift)
+    if #trail > trail_length then
+        for i = 1, #trail - 1 do
+            trail[i] = trail[i + 1]
+        end
+        trail[#trail] = nil
+    end
+
+    facing_angle = atan2(box_y - my, mx - box_x)
+
+    local dx = mx - box_x
+    local dy = my - box_y
+    local dist = sqrt(dx*dx + dy*dy)
+    if dist > 0 then
+        local nx = dx / dist
+        local ny = dy / dist
+        local len = min(dist, stab_length)
+        ray_x = box_x + nx * len
+        ray_y = box_y + ny * len
+    else
+        ray_x = box_x
+        ray_y = box_y
+    end
+
+    if btn(4) and stab_timer <= 0 then
+        stab_active = true
+        stab_timer = stab_cooldown
+    end
+    if stab_timer > 0 then stab_timer = stab_timer - 1 end
+    if stab_timer <= 0 then stab_active = false end
+end
+
+-- 3. the draw function draws the box at its *current* position
+function _draw()
+    cls()
+
+    line(box_x, box_y, ray_x, ray_y, 8)
+
+    -- draw trail (older -> darker)
+    for i = 1, #trail do
+        local t = trail[i]
+        local c = 4 + i         -- tweak this if you want different brightness
+        if c > 7 then c = 7 end -- keep color in range 0..7
+        rectfill(t.x - 1, t.y - 1, t.x + 1, t.y + 1, c)
+    end
+    -- debug, print specific values
+    print(facing_angle)
+    print(stat(32))
+    print(stat(33))
+
+    -- draw the main box 
+    rectfill(box_x - 1, box_y - 1, box_x + 1, box_y + 1, 7)
+end
