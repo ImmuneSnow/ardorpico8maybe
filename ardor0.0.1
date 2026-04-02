@@ -1,0 +1,35 @@
+-- 1. define global variables
+local box_x = 64  -- start at the center x
+local box_y = 64  -- start at the center y
+local speed = 1 -- how fast you go 
+
+-- 2. the update function runs 30 times a second to check input
+function _update()
+
+    -- check for left input (w or left arrow)
+    if (btn(0)) then
+        box_x = box_x - speed
+    end
+
+    -- check for right input (d or right arrow)
+    if (btn(1)) then
+        box_x = box_x + speed
+    end
+
+    -- check for up input (s or up arrow)
+    if (btn(2)) then
+        box_y = box_y - speed
+    end
+
+    -- check for down input (a or down arrow)
+    if (btn(3)) then
+        box_y = box_y + speed
+    end
+end
+
+-- 3. the draw function draws the box at its *current* position
+function _draw()
+    cls()
+    -- draw the main box 
+    rectfill(box_x - 1, box_y - 1, box_x + 1, box_y + 1, 7)
+end
