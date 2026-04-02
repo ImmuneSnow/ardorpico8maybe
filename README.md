@@ -7,6 +7,6 @@ Lore; Taking place in the events of Veilborn, you play as someone controlled by 
 
 Version breakdown;<br>
 Version 0<br>
-  0.1 - Simple movement engine with trail<br>
-  0.2 - Cursor, colored ray between box and cursor<br>
-  0.3 - Stabbing capabilities with new ray, dummy for testing<br>
+  # 0.1 - Simple movement engine with trail<br>
+  # 0.2 - Cursor, colored ray between box and cursor<br>
+  # 0.3 - Stabbing capabilities with new ray, dummy for testing<br>
