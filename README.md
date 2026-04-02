@@ -1,0 +1,6 @@
+ARDOR is an RPG shooter game developed by Pale Sigil, a small indie dev group
+This is a spin off of the much more ambitious and bigger Veilborn universe
+
+Discord Server: https://discord.gg/GHbV2cmBAA
+
+Lore; Taking place in the events of Veilborn, you play as someone controlled by the invading force of Lust, trapped in your own hallucinations.
