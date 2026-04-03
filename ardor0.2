@@ -8,6 +8,7 @@ local trail_length = 4
 local mx = 0
 local my = 0
 
+
 -- 1.5, initial functions (obviously before logic stuff)
 function _init()
     poke(0x5f2d, 1)
@@ -57,7 +58,7 @@ end
 function _draw()
     cls()
 
-    line(box_x, box_y, mx, my, 7)
+    line(box_x, box_y, mx, my, 8)
 
     -- draw trail (older -> darker)
     for i = 1, #trail do
