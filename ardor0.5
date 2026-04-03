@@ -1,14 +1,13 @@
 -- 1. define global variables
-local box_x = 64  -- start at the center x
-local box_y = 64  -- start at the center y
-local speed = 1 -- how fast you go 
+local box_x = 64
+local box_y = 64
+local speed = 1
 local trail = {}
 local trail_length = 4
 
 local mx = 0
 local my = 0
 
--- to control size of the ray
 local stab_length = 9
 local stab_active = false
 local stab_timer = 0
@@ -16,49 +15,27 @@ local stab_cooldown = 8
 local ray_x = 0
 local ray_y = 0
 
-local dummy = {x=96, y=64, alive=true} -- dummy for testing attacks
+local dummy = {x=96, y=64, alive=true}
 
 local prev_click = false
 local shake_timer = 0
 local shake_x = 0
 local shake_y = 0
 
-
--- 1.5, initial functions (obviously before logic stuff)
 function _init()
     poke(0x5f2d, 1)
 end
 
--- 2. the update function runs 30 times a second to check input
 function _update()
+    mx = stat(32)
+    my = stat(33)
 
-    mx = stat(32) -- x, side to side
-    my = stat(33) -- y, up and down
+    if (btn(0)) then box_x = box_x - speed end
+    if (btn(1)) then box_x = box_x + speed end
+    if (btn(2)) then box_y = box_y - speed end
+    if (btn(3)) then box_y = box_y + speed end
 
-    -- check for left input (w or left arrow)
-    if (btn(0)) then
-        box_x = box_x - speed
-    end
-
-    -- check for right input (d or right arrow)
-    if (btn(1)) then
-        box_x = box_x + speed
-    end
-
-    -- check for up input (s or up arrow)
-    if (btn(2)) then
-        box_y = box_y - speed
-    end
-
-    -- check for down input (a or down arrow)
-    if (btn(3)) then
-        box_y = box_y + speed
-    end
-
-        -- store current position in the trail
     add(trail, {x = box_x, y = box_y})
-
-    -- if trail is too long, remove the oldest entry (manual shift)
     if #trail > trail_length then
         for i = 1, #trail - 1 do
             trail[i] = trail[i + 1]
@@ -112,10 +89,8 @@ function _update()
             dummy.alive = false
         end
     end
-      clicked = stat(34) & 0x1 != 0
 end
 
--- 3. the draw function draws the box at its *current* position
 function _draw()
     cls()
     camera(shake_x, shake_y)
@@ -124,14 +99,13 @@ function _draw()
     if stab_active then ray_color = 7 end
     line(box_x, box_y, ray_x, ray_y, ray_color)
 
-    -- draw trail (older -> darker)
     for i = 1, #trail do
         local t = trail[i]
-        local c = 4 + i         -- tweak this if you want different brightness
-        if c > 7 then c = 7 end -- keep color in range 0..7
+        local c = 4 + i
+        if c > 7 then c = 7 end
         rectfill(t.x - 1, t.y - 1, t.x + 1, t.y + 1, c)
     end
-    -- debug, print specific values
+
     print(facing_angle)
     print(stat(32))
     print(stat(33))
@@ -140,11 +114,10 @@ function _draw()
     else
         print("stab_cooldown")
     end
-    if clicked then
-    	print("clicked")
+    if prev_click then
+        print("clicked")
     end
 
-    -- draw the main box 
     local box_color = 7
     if stab_active then
         box_color = (stab_timer % 2 == 0) and 7 or 8
