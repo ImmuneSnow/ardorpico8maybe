@@ -1,0 +1,132 @@
+-- 1. define global variables
+local box_x = 64
+local box_y = 64
+local speed = 1
+local trail = {}
+local trail_length = 4
+
+local mx = 0
+local my = 0
+
+local stab_length = 9
+local stab_active = false
+local stab_timer = 0
+local stab_cooldown = 8
+local ray_x = 0
+local ray_y = 0
+
+local dummy = {x=96, y=64, alive=true}
+
+local prev_click = false
+local shake_timer = 0
+local shake_x = 0
+local shake_y = 0
+
+function _init()
+    poke(0x5f2d, 1)
+end
+
+function _update()
+    mx = stat(32)
+    my = stat(33)
+
+    if (btn(0)) then box_x = box_x - speed end
+    if (btn(1)) then box_x = box_x + speed end
+    if (btn(2)) then box_y = box_y - speed end
+    if (btn(3)) then box_y = box_y + speed end
+
+    add(trail, {x = box_x, y = box_y})
+    if #trail > trail_length then
+        for i = 1, #trail - 1 do
+            trail[i] = trail[i + 1]
+        end
+        trail[#trail] = nil
+    end
+
+    facing_angle = atan2(box_y - my, mx - box_x)
+
+    local dx = mx - box_x
+    local dy = my - box_y
+    local dist = sqrt(dx*dx + dy*dy)
+    if dist > 0 then
+        local nx = dx / dist
+        local ny = dy / dist
+        local len = min(dist, stab_length)
+        ray_x = box_x + nx * len
+        ray_y = box_y + ny * len
+    else
+        ray_x = box_x
+        ray_y = box_y
+    end
+
+    if shake_timer > 0 then
+        shake_x = flr(rnd(3)) - 1
+        shake_y = flr(rnd(3)) - 1
+        shake_timer = shake_timer - 0.5
+    else
+        shake_x = 0
+        shake_y = 0
+    end
+
+    local clicking = stat(34) & 0x1 != 0
+    local just_clicked = clicking and not prev_click
+    prev_click = clicking
+
+    if (btnp(4) or just_clicked) and stab_timer <= 0 then
+        stab_active = true
+        stab_timer = stab_cooldown
+        trail = {}
+        shake_timer = 4
+    end
+
+    if stab_timer > 0 then stab_timer = stab_timer - 1 end
+    if stab_timer <= 0 then stab_active = false end
+
+    if stab_active and dummy.alive then
+        local ex = dummy.x - ray_x
+        local ey = dummy.y - ray_y
+        if sqrt(ex*ex + ey*ey) < 4 then
+            dummy.alive = false
+        end
+    end
+end
+
+function _draw()
+    cls()
+    camera(shake_x, shake_y)
+
+    local ray_color = 8
+    if stab_active then ray_color = 7 end
+    line(box_x, box_y, ray_x, ray_y, ray_color)
+
+    for i = 1, #trail do
+        local t = trail[i]
+        local c = 4 + i
+        if c > 7 then c = 7 end
+        rectfill(t.x - 1, t.y - 1, t.x + 1, t.y + 1, c)
+    end
+
+    print(facing_angle)
+    print(stat(32))
+    print(stat(33))
+    if stab_active then
+        print("stab_active")
+    else
+        print("stab_cooldown")
+    end
+    if prev_click then
+        print("clicked")
+    end
+
+    local box_color = 7
+    if stab_active then
+        box_color = (stab_timer % 2 == 0) and 7 or 8
+    end
+    rectfill(box_x - 1, box_y - 1, box_x + 1, box_y + 1, box_color)
+
+    if dummy.alive then
+        rectfill(dummy.x-1, dummy.y-1, dummy.x+1, dummy.y+1, 8)
+    end
+
+    spr(0, mx-4, my-4)
+end
