@@ -77,7 +77,7 @@ function _update()
         ray_y = box_y
     end
 
-    if btn(4) and stab_timer <= 0 then
+    if (btn(4) or stat(34) & 0x1 != 0) and stab_timer <= 0 then
         stab_active = true
         stab_timer = stab_cooldown
     end
@@ -91,6 +91,7 @@ function _update()
             dummy.alive = false
         end
     end
+      clicked = stat(34) & 0x1 != 0
 end
 
 -- 3. the draw function draws the box at its *current* position
@@ -110,6 +111,14 @@ function _draw()
     print(facing_angle)
     print(stat(32))
     print(stat(33))
+    if stab_active then
+        print("stab_active")
+    else
+        print("stab_cooldown")
+    end
+    if clicked then
+    				print("clicked")
+    end
 
     -- draw the main box 
     rectfill(box_x - 1, box_y - 1, box_x + 1, box_y + 1, 7)
