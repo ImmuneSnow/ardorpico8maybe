@@ -1,230 +1,199 @@
--- 1. define global variables
-local box_x = 64
-local box_y = 64
-local speed = 1.2
-local trail = {}
-local trail_length = 4
+-- ARDOR v0.7
+-- globals
+local px, py = 64, 64
+local speed = 1
+local trail, trail_len = {}, 4
 
-local mx = 0
-local my = 0
+local mx, my = 0, 0
+local facing = 0
 
-local stab_length = 9
+local stab_len = 9
 local stab_active = false
-local stab_timer = 0
-local stab_cooldown = 8
-local ray_x = 0
-local ray_y = 0
+local stab_timer, stab_cd = 0, 8
+local ray_x, ray_y = 0, 0
+
+local prev_click = false
+local shake_t = 0
+local shake_x, shake_y = 0, 0
+
+local gen_chance = 0.25
+local cull_r = 45
 
 local dummy = {x=96, y=64, alive=true}
 
-local prev_click = false
-local shake_timer = 0
-local shake_x = 0
-local shake_y = 0
-
-local gen_chance = 0.25
-local gen_radius = 50
-local cull_radius = 45
-
-
+-- init
 function _init()
     poke(0x5f2d, 1)
     poke(0x5f2e, 1)
     walls = {}
 end
 
+-- wall generation
 function update_walls()
-
     for i = #walls, 1, -1 do
         local w = walls[i]
-        local cx = w.x + w.w/2
-        local cy = w.y + w.h/2
-        local dx = cx - box_x
-        local dy = cy - box_y
-        if sqrt(dx*dx + dy*dy) > cull_radius then
+        local dx = (w.x+w.w/2) - px
+        local dy = (w.y+w.h/2) - py
+        if sqrt(dx*dx+dy*dy) > cull_r then
             del(walls, walls[i])
         end
     end
 
     if rnd(1) < gen_chance then
-        local angle = rnd(1)
-        local dist = 10 + rnd(15)  -- how far from player walls spawn
-        local wx = box_x + cos(angle) * dist
-        local wy = box_y + sin(angle) * dist
-        wx = max(2, min(124, wx))
-        wy = max(2, min(124, wy))
+        local a = rnd(1)
+        local d = 10 + rnd(15)
+        local wx = max(2, min(124, px + cos(a)*d))
+        local wy = max(2, min(124, py + sin(a)*d))
 
         local sizes = {{w=12,h=4},{w=4,h=12},{w=8,h=4},{w=4,h=8},{w=6,h=6}}
         local s = sizes[flr(rnd(#sizes))+1]
 
-        local overlap = false
+        local ok = true
         for w in all(walls) do
-            if wx < w.x+w.w+8 and wx+s.w > w.x-8 and wy < w.y+w.h+8 and wy+s.h > w.y-8 then
-                overlap = true
-                break
+            if wx < w.x+w.w+8 and wx+s.w > w.x-8 and
+               wy < w.y+w.h+8 and wy+s.h > w.y-8 then
+                ok = false break
             end
         end
-
-        local too_close = sqrt((wx - box_x)^2 + (wy - box_y)^2) < 16
-        if not overlap and not too_close then
+        if ok and sqrt((wx-px)^2+(wy-py)^2) >= 16 then
             add(walls, {x=wx, y=wy, w=s.w, h=s.h})
         end
     end
 end
 
+-- update
 function _update()
     update_walls()
 
-    mx = stat(32)
-    my = stat(33)
+    mx, my = stat(32), stat(33)
 
-    local nx = box_x
-    local ny = box_y
-    if (btn(0)) then nx = nx - speed end
-    if (btn(1)) then nx = nx + speed end
-    if (btn(2)) then ny = ny - speed end
-    if (btn(3)) then ny = ny + speed end
+    -- movement + collision
+    local nx, ny = px, py
+    if btn(0) then nx -= speed end
+    if btn(1) then nx += speed end
+    if btn(2) then ny -= speed end
+    if btn(3) then ny += speed end
 
-    local blocked_x = false
-    local blocked_y = false
+    local bx, by = false, false
     for w in all(walls) do
-        if nx-1 < w.x+w.w and nx+2 > w.x and box_y-1 < w.y+w.h and box_y+2 > w.y then
-            blocked_x = true
-        end
-        if box_x-1 < w.x+w.w and box_x+2 > w.x and ny-1 < w.y+w.h and ny+2 > w.y then
-            blocked_y = true
-        end
+        if nx-1 < w.x+w.w and nx+2 > w.x and py-1 < w.y+w.h and py+2 > w.y then bx = true end
+        if px-1 < w.x+w.w and px+2 > w.x and ny-1 < w.y+w.h and ny+2 > w.y then by = true end
     end
-    if not blocked_x then box_x = nx end
-    if not blocked_y then box_y = ny end
+    if not bx then px = nx end
+    if not by then py = ny end
 
-    add(trail, {x = box_x, y = box_y})
-    if #trail > trail_length then
-        for i = 1, #trail - 1 do
-            trail[i] = trail[i + 1]
-        end
+    px = max(2, min(125, px))
+    py = max(2, min(125, py))
+
+    -- trail
+    add(trail, {x=px, y=py})
+    if #trail > trail_len then
+        for i=1, #trail-1 do trail[i]=trail[i+1] end
         trail[#trail] = nil
     end
 
-    facing_angle = atan2(box_y - my, mx - box_x)
-
-    local dx = mx - box_x
-    local dy = my - box_y
-    local dist = sqrt(dx*dx + dy*dy)
+    -- ray
+    facing = atan2(py-my, mx-px)
+    local dx = mx-px
+    local dy = my-py
+    local dist = sqrt(dx*dx+dy*dy)
     if dist > 0 then
-        local nx = dx / dist
-        local ny = dy / dist
-        local len = min(dist, stab_length)
-        ray_x = box_x
-        ray_y = box_y
-        for i = 1, len do
-            local tx = box_x + nx * i
-            local ty = box_y + ny * i
+        local nx = dx/dist
+        local ny = dy/dist
+        local len = min(dist, stab_len)
+        ray_x, ray_y = px, py
+        for i=1, len do
+            local tx = px + nx*i
+            local ty = py + ny*i
             local hit = false
             for w in all(walls) do
-                if tx >= w.x and tx <= w.x+w.w and ty >= w.y and ty <= w.y+w.h then
-                    hit = true
-                    break
+                if tx >= w.x and tx <= w.x+w.w and
+                   ty >= w.y and ty <= w.y+w.h then
+                    hit = true break
                 end
             end
             if hit then break end
-            ray_x = tx
-            ray_y = ty
+            ray_x, ray_y = tx, ty
         end
     else
-        ray_x = box_x
-        ray_y = box_y
+        ray_x, ray_y = px, py
     end
 
-    if shake_timer > 0 then
-        shake_x = flr(rnd(3)) - 1
-        shake_y = flr(rnd(3)) - 1
-        shake_timer = shake_timer - 0.5
+    -- shake
+    if shake_t > 0 then
+        shake_x = flr(rnd(3))-1
+        shake_y = flr(rnd(3))-1
+        shake_t -= 0.5
     else
-        shake_x = 0
-        shake_y = 0
+        shake_x, shake_y = 0, 0
     end
 
-    local clicking = stat(34) & 0x1 != 0
+    -- stab input
+    local clicking = stat(34)&0x1 != 0
     local just_clicked = clicking and not prev_click
     prev_click = clicking
 
     if (btnp(4) or just_clicked) and stab_timer <= 0 then
         stab_active = true
-        stab_timer = stab_cooldown
+        stab_timer = stab_cd
         trail = {}
-        shake_timer = 4
+        shake_t = 4
     end
 
-    if stab_timer > 0 then stab_timer = stab_timer - 1 end
+    stab_timer = max(0, stab_timer-1)
     if stab_timer <= 0 then stab_active = false end
 
+    -- dummy hit
     if stab_active and dummy.alive then
         local ex = dummy.x - ray_x
         local ey = dummy.y - ray_y
-        if sqrt(ex*ex + ey*ey) < 4 then
-            dummy.alive = false
-        end
+        if sqrt(ex*ex+ey*ey) < 4 then dummy.alive = false end
     end
 end
 
+-- draw
 function _draw()
     cls()
     camera(shake_x, shake_y)
-    
+
+    -- walls with distance shading
     for w in all(walls) do
-        local cx = w.x + w.w/2
-        local cy = w.y + w.h/2
-        local d = sqrt((cx-box_x)^2 + (cy-box_y)^2)
-
-        local rdx = ray_x - box_x
-        local rdy = ray_y - box_y
-        local wdx = cx - box_x
-        local wdy = cy - box_y
-        local dot = rdx*wdx + rdy*wdy
-
+        local cx = w.x+w.w/2
+        local cy = w.y+w.h/2
+        local d = sqrt((cx-px)^2+(cy-py)^2)
+        local dot = (ray_x-px)*(cx-px) + (ray_y-py)*(cy-py)
         local c
         if d > 30 then c = 1
         elseif d > 25 then c = 129
         elseif dot > 0 then c = 140
         else c = 129
         end
-
         rectfill(w.x, w.y, w.x+w.w, w.y+w.h, c)
     end
 
+    -- dummy
+    if dummy.alive then
+        rectfill(dummy.x-1, dummy.y-1, dummy.x+1, dummy.y+1, 8)
+    end
+
     -- trail
-    for i = 1, #trail do
+    for i=1, #trail do
         local t = trail[i]
-        local c = 4 + i
-        if c > 7 then c = 7 end
+        local c = min(4+i, 7)
         rectfill(t.x-1, t.y-1, t.x+1, t.y+1, c)
     end
 
     -- ray
-    local ray_color = 8
-    if stab_active then ray_color = 7 end
-    line(box_x, box_y, ray_x, ray_y, ray_color)
+    line(px, py, ray_x, ray_y, stab_active and 7 or 8)
 
     -- player
-    local box_color = 7
-    if stab_active then
-        box_color = (stab_timer % 2 == 0) and 7 or 8
-    end
-    rectfill(box_x-1, box_y-1, box_x+1, box_y+1, box_color)
+    local pc = 7
+    if stab_active then pc = (stab_timer%2==0) and 7 or 8 end
+    rectfill(px-1, py-1, px+1, py+1, pc)
 
-    box_x = max(2, min(125, box_x))
-    box_y = max(2, min(125, box_y))
-
+    -- border
     rect(0, 0, 127, 127, 1)
 
-    -- debug
-    color(7)
-    print(facing_angle)
-    print(stat(32))
-    print(stat(33))
-    if stab_active then print("stab_active") else print("stab_cooldown") end
-    if prev_click then print("clicked") end
-
+    -- cursor
     spr(0, mx-4, my-4)
 end
