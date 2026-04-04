@@ -1,0 +1,208 @@
+-- 1. define global variables
+local box_x = 64
+local box_y = 64
+local speed = 1
+local trail = {}
+local trail_length = 4
+
+local mx = 0
+local my = 0
+
+local stab_length = 9
+local stab_active = false
+local stab_timer = 0
+local stab_cooldown = 8
+local ray_x = 0
+local ray_y = 0
+
+local dummy = {x=96, y=64, alive=true}
+
+local prev_click = false
+local shake_timer = 0
+local shake_x = 0
+local shake_y = 0
+
+local gen_chance = 0.3
+local gen_radius = 50
+local cull_radius = 72
+
+
+function _init()
+    poke(0x5f2d, 1)
+    walls = {}
+end
+
+function update_walls()
+    for i = #walls, 1, -1 do
+        local w = walls[i]
+        local cx = w.x + w.w/2
+        local cy = w.y + w.h/2
+        local dx = cx - box_x
+        local dy = cy - box_y
+        if sqrt(dx*dx + dy*dy) > cull_radius then
+            del(walls, walls[i])
+        end
+    end
+
+    if rnd(1) < gen_chance then
+        local angle = rnd(1)
+        local dist = 48 + rnd(20)
+        local wx = box_x + cos(angle) * dist
+        local wy = box_y + sin(angle) * dist
+
+        local sizes = {{w=12,h=4},{w=4,h=12},{w=8,h=4},{w=4,h=8},{w=6,h=6}}
+        local s = sizes[flr(rnd(#sizes))+1]
+
+        local overlap = false
+        for w in all(walls) do
+            if wx < w.x+w.w+4 and wx+s.w > w.x-4 and wy < w.y+w.h+4 and wy+s.h > w.y-4 then
+                overlap = true
+                break
+            end
+        end
+
+        if not overlap then
+            add(walls, {x=wx, y=wy, w=s.w, h=s.h})
+        end
+    end
+end
+
+function _update()
+    update_walls()
+
+    mx = stat(32)
+    my = stat(33)
+
+    local nx = box_x
+    local ny = box_y
+    if (btn(0)) then nx = nx - speed end
+    if (btn(1)) then nx = nx + speed end
+    if (btn(2)) then ny = ny - speed end
+    if (btn(3)) then ny = ny + speed end
+
+    local blocked_x = false
+    local blocked_y = false
+    for w in all(walls) do
+        if nx-2 < w.x+w.w and nx+2 > w.x and box_y-2 < w.y+w.h and box_y+2 > w.y then
+            blocked_x = true
+        end
+        if box_x-2 < w.x+w.w and box_x+2 > w.x and ny-2 < w.y+w.h and ny+2 > w.y then
+            blocked_y = true
+        end
+    end
+    if not blocked_x then box_x = nx end
+    if not blocked_y then box_y = ny end
+
+    add(trail, {x = box_x, y = box_y})
+    if #trail > trail_length then
+        for i = 1, #trail - 1 do
+            trail[i] = trail[i + 1]
+        end
+        trail[#trail] = nil
+    end
+
+    facing_angle = atan2(box_y - my, mx - box_x)
+
+    local dx = mx - box_x
+    local dy = my - box_y
+    local dist = sqrt(dx*dx + dy*dy)
+    if dist > 0 then
+        local nx = dx / dist
+        local ny = dy / dist
+        local len = min(dist, stab_length)
+        ray_x = box_x
+        ray_y = box_y
+        for i = 1, len do
+            local tx = box_x + nx * i
+            local ty = box_y + ny * i
+            local hit = false
+            for w in all(walls) do
+                if tx >= w.x and tx <= w.x+w.w and ty >= w.y and ty <= w.y+w.h then
+                    hit = true
+                    break
+                end
+            end
+            if hit then break end
+            ray_x = tx
+            ray_y = ty
+        end
+    else
+        ray_x = box_x
+        ray_y = box_y
+    end
+
+    if shake_timer > 0 then
+        shake_x = flr(rnd(3)) - 1
+        shake_y = flr(rnd(3)) - 1
+        shake_timer = shake_timer - 0.5
+    else
+        shake_x = 0
+        shake_y = 0
+    end
+
+    local clicking = stat(34) & 0x1 != 0
+    local just_clicked = clicking and not prev_click
+    prev_click = clicking
+
+    if (btnp(4) or just_clicked) and stab_timer <= 0 then
+        stab_active = true
+        stab_timer = stab_cooldown
+        trail = {}
+        shake_timer = 4
+    end
+
+    if stab_timer > 0 then stab_timer = stab_timer - 1 end
+    if stab_timer <= 0 then stab_active = false end
+
+    if stab_active and dummy.alive then
+        local ex = dummy.x - ray_x
+        local ey = dummy.y - ray_y
+        if sqrt(ex*ex + ey*ey) < 4 then
+            dummy.alive = false
+        end
+    end
+end
+
+function _draw()
+    cls()
+    camera(shake_x, shake_y)
+
+    local ray_color = 8
+    if stab_active then ray_color = 7 end
+    line(box_x, box_y, ray_x, ray_y, ray_color)
+
+    for i = 1, #trail do
+        local t = trail[i]
+        local c = 4 + i
+        if c > 7 then c = 7 end
+        rectfill(t.x - 1, t.y - 1, t.x + 1, t.y + 1, c)
+    end
+
+    print(facing_angle)
+    print(stat(32))
+    print(stat(33))
+    if stab_active then
+        print("stab_active")
+    else
+        print("stab_cooldown")
+    end
+    if prev_click then
+        print("clicked")
+    end
+
+    for w in all(walls) do
+        rectfill(w.x, w.y, w.x+w.w, w.y+w.h, 5)
+    end
+
+    local box_color = 7
+    if stab_active then
+        box_color = (stab_timer % 2 == 0) and 7 or 8
+    end
+    rectfill(box_x - 1, box_y - 1, box_x + 1, box_y + 1, box_color)
+
+    if dummy.alive then
+        rectfill(dummy.x-1, dummy.y-1, dummy.x+1, dummy.y+1, 8)
+    end
+
+    spr(0, mx-4, my-4)
+end
