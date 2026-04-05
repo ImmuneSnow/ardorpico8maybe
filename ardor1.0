@@ -1,0 +1,538 @@
+-- globals
+local px,py       = 64,64
+local speed       = 1
+local trail       = {}
+local trail_len   = 4
+
+local mx,my = 64,64
+local facing      = 0
+
+local stab_len    = 9
+local stab_active = false
+local stab_timer  = 0
+local stab_cd     = 8
+local ray_x,ray_y = 0,0
+
+local prev_click  = false
+local shake_t     = 0
+local shake_x     = 0
+local shake_y     = 0
+
+local gen_chance  = 0.25
+local cull_r      = 45
+local walls       = {}
+
+local enemies     = {}
+
+local wave        = 1
+local wave_timer  = 300
+local wave_flash  = 0
+local spawn_timer = 60
+
+local score       = 0
+local score_flash = 0
+
+local downed      = false
+local down_timer  = 120
+local down_presses= 0
+local down_needed = 15
+local prev_dirs   = {false,false,false,false}
+local inv_timer   = 0
+
+local game_state  = "menu"  -- replace your existing "play" default
+local final_score = 0
+local final_wave  = 0
+
+local ready = false
+
+local prev_mx,prev_my=0,0
+
+local particles = {}
+
+local wave_pulse = {active=false, r=0, ox=64, oy=64}
+
+local death_timer = 0
+
+local walk_timer = 0
+
+-- helpers
+local function sq_dist(ax,ay,bx,by)
+    local dx=ax-bx local dy=ay-by return dx*dx+dy*dy
+end
+
+-- init
+function _init()
+    poke(0x5f2d,1)
+    poke(0x5f2e,1)
+    game_state="menu"
+    prev_click=true  -- prevent click-through from menu to stab on first frame
+end
+
+-- wall generation
+function update_walls()
+    for i=#walls,1,-1 do
+        local w=walls[i]
+        if sq_dist(w.x+w.w/2,w.y+w.h/2,px,py) > cull_r*cull_r then
+            del(walls,walls[i])
+        end
+    end
+
+    if rnd(1)<gen_chance then
+        local a=rnd(1)
+        local d=10+rnd(15)
+        local wx=max(2,min(124,px+cos(a)*d))
+        local wy=max(2,min(124,py+sin(a)*d))
+        local sizes={{w=12,h=4},{w=4,h=12},{w=8,h=4},{w=4,h=8},{w=6,h=6},{w=4,h=4}}
+        local s=sizes[flr(rnd(#sizes))+1]
+        local ok=true
+        for w in all(walls) do
+            if wx<w.x+w.w+8 and wx+s.w>w.x-8 and
+               wy<w.y+w.h+8 and wy+s.h>w.y-8 then
+                ok=false break
+            end
+        end
+        if ok and sq_dist(wx,wy,px,py)>=256 then
+            add(walls,{x=wx,y=wy,w=s.w,h=s.h})
+        end
+    end
+end
+
+-- wave + spawning
+function update_wave()
+    wave_timer-=1
+    if wave_timer<=0 then
+        wave+=1
+        sfx(8)
+        wave_flash=30
+        wave_pulse={active=true, r=0, ox=px, oy=py}
+        wave_timer=min(1200,300+wave*60)
+        spawn_timer=60
+    end
+
+    spawn_timer-=1
+    if spawn_timer<=0 then
+        spawn_timer=max(8,50-wave*5)
+        local count=wave<3 and 1 or 2
+        for i=1,count do
+            local a=rnd(1)
+            local d=18+rnd(12)
+            local ex=max(2,min(125,px+cos(a)*d))
+            local ey=max(2,min(125,py+sin(a)*d))
+            local ok=true
+            for w in all(walls) do
+                if ex>=w.x-2 and ex<=w.x+w.w+2 and
+                    ey>=w.y-2 and ey<=w.y+w.h+2 then
+                    ok=false break
+                end
+            end
+            if ok then
+                local etype=rnd(1)<0.75 and "chase" or "flee"
+                sfx(etype=="chase" and 1 or 2)
+                add(enemies,{x=ex,y=ey,alive=true,etype=etype})
+            end
+        end
+    end
+end
+
+-- enemy ai
+function update_enemies()
+    for e in all(enemies) do
+        if e.alive then
+            local dx=px-e.x
+            local dy=py-e.y
+            local dist=sqrt(dx*dx+dy*dy)
+            if e.etype=="flee" and dist>cull_r then
+                e.alive=false
+            elseif dist>0 then
+                local spd_scale=1+(wave-1)*0.06
+                local spd=e.etype=="chase" and 0.5*spd_scale or -0.6*spd_scale
+                e.x+=dx/dist*spd
+                e.y+=dy/dist*spd
+            end
+            if sq_dist(e.x,e.y,px,py)<9 and not downed and inv_timer<=0 then
+                downed=true
+                sfx(5)
+                down_timer=120
+                down_presses=0
+                down_needed=flr(15+(wave-1)*(35/9))
+            end
+        else
+            del(enemies,e)
+        end
+    end
+end
+
+-- downed minigame
+function update_downed()
+    down_timer-=1
+
+    for i=0,3 do
+        local held=btn(i)
+        if held and not prev_dirs[i+1] then
+            down_presses+=1
+            sfx(6)
+            shake_t=6
+        end
+        prev_dirs[i+1]=held
+    end
+
+    if down_presses>=down_needed then
+        downed=false
+        down_presses=0
+        shake_t=0
+        for j=1,8 do
+            add(particles,{
+                x=px,y=py,
+                dx=rnd(4)-2,
+                dy=rnd(4)-2,
+                t=8,
+                life=25+flr(rnd(20)),
+                col=7
+            })
+        end
+        inv_timer=90
+        sfx(7)
+    elseif down_timer<=0 then
+        downed=false
+        down_presses=0
+        final_score=score
+        final_wave=wave
+        sfx(9)
+        game_state="dead"
+        death_timer = 0
+    end
+end
+
+-- update
+-- update
+function _update()
+    if game_state=="menu" then
+        if btnp(4) or btnp(5) or btn(4) or btn(5) then
+            game_state="play"
+            prev_click=true
+            ready=false
+        end
+        return
+    end
+
+    if game_state=="dead" then
+        if death_timer<60 then death_timer+=1 end
+        if btnp(4) or btnp(5) or btn(4) or btn(5) then
+            score=0 wave=1 wave_timer=300 spawn_timer=60
+            enemies={} walls={} trail={}
+            inv_timer=0 downed=false
+            px,py=64,64
+            mx,my=64,64
+            ready=false
+            prev_click=true
+            death_timer=0
+            game_state="menu"
+        end
+        return
+    end
+
+    -- game_state=="play" only beyond here
+    update_walls()
+    update_wave()
+    update_enemies()
+
+    local raw_mx,raw_my=stat(32),stat(33)
+    if not ready then
+        if raw_mx~=prev_mx or raw_my~=prev_my then
+            ready=true
+        end
+        mx,my=64,64
+        ray_x,ray_y=px,py
+        return
+    end
+    mx,my=raw_mx,raw_my
+
+    if inv_timer>0 then inv_timer-=1 end
+
+    if downed then
+        update_downed()
+        if shake_t>0 then
+            shake_x=flr(rnd(3))-1
+            shake_y=flr(rnd(3))-1
+            shake_t-=0.5
+        else
+            shake_x,shake_y=0,0
+        end
+        if wave_flash>0  then wave_flash-=1  end
+        if score_flash>0 then score_flash-=1 end
+        return
+    end
+
+    -- movement
+    local nx,ny=px,py
+    if btn(0) then nx-=speed end
+    if btn(1) then nx+=speed end
+    if btn(2) then ny-=speed end
+    if btn(3) then ny+=speed end
+
+    local bx,by=false,false
+    for w in all(walls) do
+        if nx-1<w.x+w.w and nx+2>w.x and py-1<w.y+w.h and py+2>w.y then bx=true end
+        if px-1<w.x+w.w and px+2>w.x and ny-1<w.y+w.h and ny+2>w.y then by=true end
+    end
+    if not bx then px=nx end
+    if not by then py=ny end
+    px=max(2,min(125,px))
+    py=max(2,min(125,py))
+
+    local moving=btn(0) or btn(1) or btn(2) or btn(3)
+    if moving then
+        if walk_timer==0 then sfx(3,3) end
+        walk_timer+=1
+        if walk_timer>=10 then
+            sfx(3,3)
+            walk_timer=0
+        end
+    else
+        if walk_timer>0 then
+            sfx(-1,3)
+            walk_timer=0
+        end
+    end
+    -- trail
+    add(trail,{x=px,y=py})
+    if #trail>trail_len then
+        for i=1,#trail-1 do trail[i]=trail[i+1] end
+        trail[#trail]=nil
+    end
+
+    -- ray (wall-clipped)
+    facing=atan2(py-my,mx-px)
+    local dx=mx-px
+    local dy=my-py
+    local dist=sqrt(dx*dx+dy*dy)
+    ray_x,ray_y=px,py
+    if dist>0 then
+        local rnx=dx/dist
+        local rny=dy/dist
+        for i=1,min(dist,stab_len) do
+            local tx=px+rnx*i
+            local ty=py+rny*i
+            local hit=false
+            for w in all(walls) do
+                if tx>=w.x and tx<=w.x+w.w and
+                   ty>=w.y and ty<=w.y+w.h then
+                    hit=true break
+                end
+            end
+            if hit then break end
+            ray_x,ray_y=tx,ty
+        end
+    end
+
+    -- screenshake
+    if shake_t>0 then
+        shake_x=flr(rnd(3))-1
+        shake_y=flr(rnd(3))-1
+        shake_t-=0.5
+    else
+        shake_x,shake_y=0,0
+    end
+
+    -- stab input
+    local clicking=stat(34)&0x1!=0
+    local just_clicked=clicking and not prev_click
+    prev_click=clicking
+
+    if (btnp(4) or just_clicked) and stab_timer<=0 then
+        stab_active=true
+        sfx(0)
+        stab_timer=stab_cd
+        trail={}
+    end
+
+    stab_timer=max(0,stab_timer-1)
+    if stab_timer<=0 then stab_active=false end
+
+    -- stab hit detection
+    if stab_active then
+        local rdx=ray_x-px
+        local rdy=ray_y-py
+        local rdist=sqrt(rdx*rdx+rdy*rdy)
+        if rdist>0 then
+            local rnx=rdx/rdist
+            local rny=rdy/rdist
+            for e in all(enemies) do
+                if e.alive then
+                    for i=1,stab_len do
+                        local tx=px+rnx*i
+                        local ty=py+rny*i
+                        if sq_dist(e.x,e.y,tx,ty)<9 then
+                            e.alive=false
+                            sfx(4)
+                            for j=1,4 do
+                                add(particles,{
+                                    x=e.x,y=e.y,
+                                    dx=rnd(2)-1,
+                                    dy=rnd(2)-1,
+                                    t=6,
+                                    life=20+flr(rnd(20)),
+                                    col=e.etype=="flee" and 12 or 8
+                                })
+                            end
+                            score+=e.etype=="chase" and 5 or 10
+                            score_flash=8
+                            shake_t=4
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    for p in all(particles) do
+        if p.t>0 then
+            p.x+=p.dx
+            p.y+=p.dy
+            p.t-=1
+        end
+        p.life-=1
+        if p.life<=0 then del(particles,p) end
+    end
+
+    if wave_flash>0  then wave_flash-=1  end
+    if wave_pulse.active then
+        wave_pulse.r+=2
+        if wave_pulse.r>80 then wave_pulse.active=false end
+    end
+    if score_flash>0 then score_flash-=1 end
+    prev_mx,prev_my=stat(32),stat(33)
+end
+
+-- draw
+function _draw()
+    -- menu draws nothing else
+    if game_state=="menu" then
+        cls(0)
+        print("ardor",48,30,8)
+        print("version 1.0",41,38,1)
+        print("move - arrow keys",31,54,7)
+        print("stab - x or click",31,62,7)
+        if t()%0.8<0.4 then
+            print("press x to start",32,82,7)
+        end
+        rect(0,0,127,127,1)
+        return
+    end
+
+    if game_state=="dead" then
+        cls(0)
+        camera()
+        local sx=flr(rnd(3))-1
+        local sy=flr(rnd(3))-1
+        print("consumed",45+sx,49+sy,8)
+        if death_timer>=30 then
+            rectfill(24,58,103,86,0)
+            rect(24,58,103,87,7)
+            print("score  "..final_score,34,62,7)
+            print("wave   "..final_wave,34,70,7)
+            print("x to restart",38,80,5)
+        end
+        return
+    end
+
+    cls()
+    camera(shake_x,shake_y)
+
+    -- walls
+    for w in all(walls) do
+        local cx=w.x+w.w/2
+        local cy=w.y+w.h/2
+        local d=sqrt(sq_dist(cx,cy,px,py))
+        local dot=(ray_x-px)*(cx-px)+(ray_y-py)*(cy-py)
+        local c
+        if     d>30  then c=1
+        elseif d>25  then c=129
+        elseif dot>0 then c=140
+        else              c=129
+        end
+        rectfill(w.x,w.y,w.x+w.w,w.y+w.h,c)
+    end
+
+    if wave_pulse.active then
+        local r=wave_pulse.r
+        for i=0,31 do
+            local a=i/32
+            local px2=wave_pulse.ox+cos(a)*r
+            local py2=wave_pulse.oy+sin(a)*r
+            local blocked=false
+            for w in all(walls) do
+                if px2>=w.x and px2<=w.x+w.w and
+                py2>=w.y and py2<=w.y+w.h then
+                    blocked=true break
+                end
+            end
+            if not blocked then
+                pset(px2,py2,1)
+            end
+        end
+    end
+
+    -- enemies
+    for e in all(enemies) do
+        if e.alive then
+            rectfill(e.x-1,e.y-1,e.x+1,e.y+1,e.etype=="chase" and 8 or 12)
+        end
+    end
+
+    for p in all(particles) do
+        local c=p.t>0 and 7 or p.col
+        pset(p.x,p.y,c)
+    end
+
+    -- trail
+    for i=1,#trail do
+        local t=trail[i]
+        rectfill(t.x-1,t.y-1,t.x+1,t.y+1,min(4+i,7))
+    end
+
+    -- ray + player
+    if ready then
+        line(px,py,ray_x,ray_y,stab_active and 7 or 8)
+    end
+
+    local pc
+    if downed then
+        pc=(t()%0.1<0.05) and 12 or 1
+    elseif inv_timer>0 then
+        pc=(inv_timer%4<2) and 12 or 7
+    elseif stab_active then
+        pc=stab_timer%2==0 and 7 or 8
+    else
+        pc=7
+    end
+    rectfill(px-1,py-1,px+1,py+1,pc)
+
+    -- downed ui
+    if downed then
+        local bw=flr((down_presses/down_needed)*60)
+        rectfill(34,60,94,66,1)
+        rectfill(34,60,34+bw,66,12)
+        rect(34,60,94,66,7)
+        local secs=flr(down_timer/30)
+        print(down_needed-down_presses,34,54,7)
+        print(secs,91,54,7)
+        print("stay",56,68,12)
+    end
+
+    -- border
+    camera()
+    local bc=wave_flash>0 and (wave_flash%4<2 and 7 or 1) or 1
+    rect(0,0,127,127,bc)
+    camera(shake_x,shake_y)
+
+    -- cursor
+    spr(0,mx-4,my-4)
+
+    -- hud
+    camera()
+    local sc=score_flash>0 and (score_flash%2==0 and 7 or 10) or 7
+    print(score,2,2,sc)
+    print("w"..wave,61,2,7)
+end
