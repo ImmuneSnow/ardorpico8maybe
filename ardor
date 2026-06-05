@@ -1,0 +1,54 @@
+local posx, posy = 64, 64
+local speed = 0.5
+
+local velx, vely = 0, 0
+local accelx, accely = 0, 0
+local friction = 0.8
+
+local bmax = 2
+
+local trail = {}
+local trail_length = 4
+
+function _update()
+    velx += accelx
+    vely += accely
+
+    accelx, accely = 0, 0
+
+    velx *= friction
+    vely *= friction
+
+    posx += velx
+    posy += vely
+
+    if velx > bmax then velx = bmax end
+    if velx < -bmax then velx = -bmax end
+    if vely > bmax then vely = bmax end
+    if vely < -bmax then vely = -bmax end
+
+    if btn(0) then velx -= speed end
+    if btn(1) then velx += speed end
+    if btn(2) then vely -= speed end
+    if btn(3) then vely += speed end
+    
+    add(trail, {x = posx, y = posy})
+
+    if #trail > trail_length then
+        for i = 1, #trail - 1 do
+            trail[i] = trail[i + 1]
+        end
+        trail[#trail] = nil
+    end
+end
+
+function _draw()
+    cls()
+    for i=1,#trail do
+        local t = trail[i]
+        local c = 4 + i
+        if c > 7 then c = 7 end
+        rectfill(t.x - 1, t.y - 1, t.x + 1, t.y + 1, c)
+    end
+    rectfill(posx-1, posy-1, posx+1, posy+1, 7)
+end
